@@ -47,48 +47,45 @@ As you can see, the function uses multiple type conversions and string operation
 From my testing this is what the fastest version looks like:
 
 ```typescript
-function validateNIFBitwise(nif: string): boolean {
-  // 1. Quick length check
+const VALID_FIRST = 0b0010_1110_1110; // 1,2,3,5,6,8
+const VALID_4X = 0b0010_0000_0000; // Only 45 is valid
+const VALID_7X = 0b0010_1010_111; // 70,71,72,74,75,77,79
+const VALID_9X = 0b0011_0000_11; // 90,91,98,99
+
+function validateNIFBitwiseShift(nif: string): boolean {
   if (nif.length !== 9) return false;
 
-  // 2. Check first digit patterns immediately (most common rejection point)
   const c0 = nif.charCodeAt(0);
-  if (c0 < 48 || c0 > 57) return false; // Not a digit
+  const c1 = nif.charCodeAt(1);
 
-  // 3. Use bit mask for first-digit pattern matching (faster than multiple comparisons)
-  // Bitmap: positions 1,2,3,5,6,8 set to 1
-  const firstDigitValid = ((1 << (c0 - 48)) & 0b0010_1110_1110) !== 0;
+  if (c0 < 48 || c0 > 57 || c1 < 48 || c1 > 57) return false;
 
-  // Initialize c1 outside the conditional logic
-  let c1: number;
+  // Optimize branching with lookup masks for first digit
+  const d0 = c0 - 48;
+  const isFirstDigitValid = ((1 << d0) & VALID_FIRST) !== 0;
 
-  // 4. Fast-path validation for valid first digits
-  if (!firstDigitValid) {
-    // 5. Check complex patterns for specific first digits
-    c1 = nif.charCodeAt(1);
-    if (c1 < 48 || c1 > 57) return false; // Not a digit
+  // If first digit isn't valid on its own, check two-digit patterns
+  if (!isFirstDigitValid) {
+    const d1 = c1 - 48;
+    let valid = false;
 
-    // Optimized pattern matching using character codes directly
-    if (c0 === 52) {
-      // '4'
-      if (c1 !== 53) return false; // Only '45' is valid
-    } else if (c0 === 55) {
-      // '7'
-      // Bitmap for valid second digits after '7': 0,1,2,4,5,7,9
-      if (((1 << (c1 - 48)) & 0b0010_1010_111) === 0) return false;
-    } else if (c0 === 57) {
-      // '9'
-      // Bitmap for valid second digits after '9': 0,1,8,9
-      if (((1 << (c1 - 48)) & 0b0011_0000_11) === 0) return false;
-    } else {
-      return false; // Any other digit is invalid
+    switch (d0) {
+      case 4:
+        valid = d1 === 5;
+        break; // Only 45 is valid
+      case 7:
+        valid = ((1 << d1) & VALID_7X) !== 0;
+        break; // 7 with 0,1,2,4,5,7,9
+      case 9:
+        valid = ((1 << d1) & VALID_9X) !== 0;
+        break; // 9 with 0,1,8,9
+      default:
+        valid = false;
     }
-  } else {
-    // If we didn't check c1 yet, get it now
-    c1 = nif.charCodeAt(1);
+
+    if (!valid) return false;
   }
 
-  // 6. Get remaining character codes and validate
   const c2 = nif.charCodeAt(2);
   const c3 = nif.charCodeAt(3);
   const c4 = nif.charCodeAt(4);
@@ -97,28 +94,37 @@ function validateNIFBitwise(nif: string): boolean {
   const c7 = nif.charCodeAt(7);
   const c8 = nif.charCodeAt(8);
 
-  // 7. Combined digit validation for remaining digits (packed comparison)
   if (
-    (c1 | c2 | c3 | c4 | c5 | c6 | c7 | c8) >>> 0 > 57 ||
-    (c1 & c2 & c3 & c4 & c5 & c6 & c7 & c8) >>> 0 < 48
+    c2 < 48 ||
+    c2 > 57 ||
+    c3 < 48 ||
+    c3 > 57 ||
+    c4 < 48 ||
+    c4 > 57 ||
+    c5 < 48 ||
+    c5 > 57 ||
+    c6 < 48 ||
+    c6 > 57 ||
+    c7 < 48 ||
+    c7 > 57 ||
+    c8 < 48 ||
+    c8 > 57
   ) {
     return false;
   }
 
-  // 8. Calculate checksum directly without intermediate variables
-  const checksum =
+  const sum =
     (c0 - 48) * 9 +
-    (c1 - 48) * 8 +
+    ((c1 - 48) << 3) + // x8 (bitwise shift)
     (c2 - 48) * 7 +
     (c3 - 48) * 6 +
     (c4 - 48) * 5 +
     (c5 - 48) * 4 +
     (c6 - 48) * 3 +
-    (c7 - 48) * 2;
+    ((c7 - 48) << 1); // x2 (bitwise shift)
 
-  const checkDigit = checksum % 11 < 2 ? 0 : 11 - (checksum % 11);
-
-  return checkDigit === c8 - 48;
+  const remainder = sum % 11;
+  return (remainder < 2 ? 0 : 11 - remainder) === c8 - 48;
 }
 ```
 
@@ -132,24 +138,24 @@ Bun v1.2.5:
 Running benchmark with 10000 NIFs, 1000 iterations each
 
 --- BENCHMARK RESULTS ---
-Original:             5.69ms (min: 5.52ms)
-Set-based:            1.41ms (min: 1.35ms)
-Direct comparison:    0.94ms (min: 0.90ms)
+Original:             5.19ms (min: 5.04ms)
+Set-based:            1.38ms (min: 1.34ms)
+Direct comparison:    0.93ms (min: 0.90ms)
 Fully optimized:      0.71ms (min: 0.68ms)
-Bitwise optimized:    0.51ms (min: 0.47ms)
+Bitwise optimized:    0.76ms (min: 0.72ms)
 TypedArray version:   0.82ms (min: 0.77ms)
-BitwiseShift version: 0.55ms (min: 0.51ms)
+BitwiseShift version: 0.54ms (min: 0.51ms)
 
-Fastest implementation: Bitwise optimized (0.51ms)
+Fastest implementation: BitwiseShift version (0.54ms)
 
 --- PERFORMANCE COMPARISON ---
-Bitwise optimized    0.00% (fastest)
-BitwiseShift version 8.83% slower
-Fully optimized      39.34% slower
-TypedArray version   60.73% slower
-Direct comparison    85.05% slower
-Set-based            176.63% slower
-Original             1020.38% slower
+BitwiseShift version 0.00% (fastest)
+Fully optimized      31.93% slower
+Bitwise optimized    42.72% slower
+TypedArray version   52.68% slower
+Direct comparison    74.26% slower
+Set-based            158.43% slower
+Original             869.02% slower
 ```
 
 Node v22.14.0:
@@ -158,22 +164,22 @@ Node v22.14.0:
 Running benchmark with 10000 NIFs, 1000 iterations each
 
 --- BENCHMARK RESULTS ---
-Original:             2.85ms (min: 2.75ms)
-Set-based:            1.02ms (min: 0.99ms)
-Direct comparison:    0.72ms (min: 0.70ms)
+Original:             2.88ms (min: 2.75ms)
+Set-based:            1.02ms (min: 0.98ms)
+Direct comparison:    0.73ms (min: 0.70ms)
 Fully optimized:      0.43ms (min: 0.41ms)
-Bitwise optimized:    0.33ms (min: 0.31ms)
-TypedArray version:   0.99ms (min: 0.92ms)
+Bitwise optimized:    0.46ms (min: 0.43ms)
+TypedArray version:   1.00ms (min: 0.92ms)
 BitwiseShift version: 0.39ms (min: 0.37ms)
 
-Fastest implementation: Bitwise optimized (0.33ms)
+Fastest implementation: BitwiseShift version (0.39ms)
 
 --- PERFORMANCE COMPARISON ---
-Bitwise optimized    0.00% (fastest)
-BitwiseShift version 17.88% slower
-Fully optimized      32.14% slower
-Direct comparison    120.37% slower
-TypedArray version   200.34% slower
-Set-based            211.52% slower
-Original             769.95% slower
+BitwiseShift version 0.00% (fastest)
+Fully optimized      10.81% slower
+Bitwise optimized    17.34% slower
+Direct comparison    86.67% slower
+TypedArray version   156.58% slower
+Set-based            162.72% slower
+Original             640.39% slower
 ```

@@ -318,9 +318,11 @@ function validateNIF4(nif: string): boolean {
   const c0 = nif.charCodeAt(0);
   if (c0 < 48 || c0 > 57) return false; // Not a digit
 
-  // 3. Use bit mask for first-digit pattern matching (faster than multiple comparisons)
-  // Bitmap: positions 1,2,3,5,6,8 set to 1
-  const firstDigitValid = ((1 << (c0 - 48)) & 0b0010_1110_1110) !== 0;
+  // 3 .Correct bit mask for first-digit pattern matching
+  // Bitmap for digits 1,2,3,5,6,8 (positions 0-indexed)
+  const VALID_FIRST_DIGITS =
+    (1 << 1) | (1 << 2) | (1 << 3) | (1 << 5) | (1 << 6) | (1 << 8);
+  const firstDigitValid = ((1 << (c0 - 48)) & VALID_FIRST_DIGITS) !== 0;
 
   // Initialize c1 outside the conditional logic
   let c1: number;
@@ -338,11 +340,20 @@ function validateNIF4(nif: string): boolean {
     } else if (c0 === 55) {
       // '7'
       // Bitmap for valid second digits after '7': 0,1,2,4,5,7,9
-      if (((1 << (c1 - 48)) & 0b0010_1010_111) === 0) return false;
+      const VALID_AFTER_7 =
+        (1 << 0) |
+        (1 << 1) |
+        (1 << 2) |
+        (1 << 4) |
+        (1 << 5) |
+        (1 << 7) |
+        (1 << 9);
+      if (((1 << (c1 - 48)) & VALID_AFTER_7) === 0) return false;
     } else if (c0 === 57) {
       // '9'
       // Bitmap for valid second digits after '9': 0,1,8,9
-      if (((1 << (c1 - 48)) & 0b0011_0000_11) === 0) return false;
+      const VALID_AFTER_9 = (1 << 0) | (1 << 1) | (1 << 8) | (1 << 9);
+      if (((1 << (c1 - 48)) & VALID_AFTER_9) === 0) return false;
     } else {
       return false; // Any other digit is invalid
     }
@@ -360,10 +371,24 @@ function validateNIF4(nif: string): boolean {
   const c7 = nif.charCodeAt(7);
   const c8 = nif.charCodeAt(8);
 
-  // 7. Combined digit validation for remaining digits (packed comparison)
+  // 7. Individual digit validation instead of combined checks
   if (
-    (c1 | c2 | c3 | c4 | c5 | c6 | c7 | c8) >>> 0 > 57 ||
-    (c1 & c2 & c3 & c4 & c5 & c6 & c7 & c8) >>> 0 < 48
+    c1 < 48 ||
+    c1 > 57 ||
+    c2 < 48 ||
+    c2 > 57 ||
+    c3 < 48 ||
+    c3 > 57 ||
+    c4 < 48 ||
+    c4 > 57 ||
+    c5 < 48 ||
+    c5 > 57 ||
+    c6 < 48 ||
+    c6 > 57 ||
+    c7 < 48 ||
+    c7 > 57 ||
+    c8 < 48 ||
+    c8 > 57
   ) {
     return false;
   }
