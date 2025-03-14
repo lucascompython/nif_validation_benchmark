@@ -48,7 +48,6 @@ From my testing this is what the fastest version looks like:
 
 ```typescript
 const VALID_FIRST = 0b0010_1110_1110; // 1,2,3,5,6,8
-const VALID_4X = 0b0010_0000_0000; // Only 45 is valid
 const VALID_7X = 0b0010_1010_111; // 70,71,72,74,75,77,79
 const VALID_9X = 0b0011_0000_11; // 90,91,98,99
 
